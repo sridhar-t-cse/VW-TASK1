@@ -1,5 +1,4 @@
-import config from '@payload-config'
-import { getPayload } from 'payload'
+import { getLocalNotes, createLocalNote } from '@/lib/local-notes'
 
 const MAX_NOTE_LENGTH = 5000
 
@@ -37,19 +36,30 @@ async function readJSON(request: Request): Promise<NoteInput | null> {
 
 export async function GET(request: Request) {
   try {
-    const payload = await getPayload({ config })
-    const { user } = await payload.auth({ headers: request.headers })
-    const result = await payload.find({
-      collection: 'notes',
-      depth: 0,
-      limit: 100,
-      overrideAccess: false,
-      pagination: false,
-      sort: '-updatedAt',
-      user,
-    })
+    if (process.env.FIGMA_EID && process.env.FIGMA_CONTENT_API_CONTENT_SYSTEM_ID) {
+      try {
+        const { getPayload } = await import('payload')
+        const config = (await import('@payload-config')).default
+        const payload = await getPayload({ config })
+        const { user } = await payload.auth({ headers: request.headers })
+        const result = await payload.find({
+          collection: 'notes',
+          depth: 0,
+          limit: 100,
+          overrideAccess: false,
+          pagination: false,
+          sort: '-updatedAt',
+          user,
+        })
 
-    return Response.json({ notes: result.docs })
+        return Response.json({ notes: result.docs })
+      } catch (payloadError) {
+        console.warn('Payload unavailable, falling back to local storage:', payloadError)
+      }
+    }
+
+    const notes = await getLocalNotes()
+    return Response.json({ notes })
   } catch {
     return Response.json(
       { error: 'We could not load your notes. Please try again.' },
@@ -70,15 +80,26 @@ export async function POST(request: Request) {
   }
 
   try {
-    const payload = await getPayload({ config })
-    const { user } = await payload.auth({ headers: request.headers })
-    const note = await payload.create({
-      collection: 'notes',
-      data: { content: validated.content },
-      overrideAccess: false,
-      user,
-    })
+    if (process.env.FIGMA_EID && process.env.FIGMA_CONTENT_API_CONTENT_SYSTEM_ID) {
+      try {
+        const { getPayload } = await import('payload')
+        const config = (await import('@payload-config')).default
+        const payload = await getPayload({ config })
+        const { user } = await payload.auth({ headers: request.headers })
+        const note = await payload.create({
+          collection: 'notes',
+          data: { content: validated.content },
+          overrideAccess: false,
+          user,
+        })
 
+        return Response.json({ message: 'Note saved.', note }, { status: 201 })
+      } catch (payloadError) {
+        console.warn('Payload unavailable, falling back to local storage:', payloadError)
+      }
+    }
+
+    const note = await createLocalNote(validated.content)
     return Response.json({ message: 'Note saved.', note }, { status: 201 })
   } catch {
     return Response.json(

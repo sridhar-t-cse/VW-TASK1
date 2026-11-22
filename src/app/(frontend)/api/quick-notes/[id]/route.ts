@@ -1,5 +1,4 @@
-import config from '@payload-config'
-import { getPayload } from 'payload'
+import { updateLocalNote, deleteLocalNote } from '@/lib/local-notes'
 
 const MAX_NOTE_LENGTH = 5000
 
@@ -39,7 +38,7 @@ function operationError(error: unknown, fallback: string) {
   )
 }
 
-export async function PATCH(request: Request, context: RouteContext<'/api/quick-notes/[id]'>) {
+export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params
   const validated = await getContent(request)
 
@@ -48,15 +47,30 @@ export async function PATCH(request: Request, context: RouteContext<'/api/quick-
   }
 
   try {
-    const payload = await getPayload({ config })
-    const { user } = await payload.auth({ headers: request.headers })
-    const note = await payload.update({
-      collection: 'notes',
-      id,
-      data: { content: validated.content },
-      overrideAccess: false,
-      user,
-    })
+    if (process.env.FIGMA_EID && process.env.FIGMA_CONTENT_API_CONTENT_SYSTEM_ID) {
+      try {
+        const { getPayload } = await import('payload')
+        const config = (await import('@payload-config')).default
+        const payload = await getPayload({ config })
+        const { user } = await payload.auth({ headers: request.headers })
+        const note = await payload.update({
+          collection: 'notes',
+          id,
+          data: { content: validated.content },
+          overrideAccess: false,
+          user,
+        })
+
+        return Response.json({ message: 'Note updated.', note })
+      } catch (payloadError) {
+        console.warn('Payload unavailable, falling back to local storage:', payloadError)
+      }
+    }
+
+    const note = await updateLocalNote(id, validated.content)
+    if (!note) {
+      return Response.json({ error: 'That note no longer exists.' }, { status: 404 })
+    }
 
     return Response.json({ message: 'Note updated.', note })
   } catch (error) {
@@ -64,18 +78,33 @@ export async function PATCH(request: Request, context: RouteContext<'/api/quick-
   }
 }
 
-export async function DELETE(request: Request, context: RouteContext<'/api/quick-notes/[id]'>) {
+export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params
 
   try {
-    const payload = await getPayload({ config })
-    const { user } = await payload.auth({ headers: request.headers })
-    await payload.delete({
-      collection: 'notes',
-      id,
-      overrideAccess: false,
-      user,
-    })
+    if (process.env.FIGMA_EID && process.env.FIGMA_CONTENT_API_CONTENT_SYSTEM_ID) {
+      try {
+        const { getPayload } = await import('payload')
+        const config = (await import('@payload-config')).default
+        const payload = await getPayload({ config })
+        const { user } = await payload.auth({ headers: request.headers })
+        await payload.delete({
+          collection: 'notes',
+          id,
+          overrideAccess: false,
+          user,
+        })
+
+        return Response.json({ message: 'Note deleted.' })
+      } catch (payloadError) {
+        console.warn('Payload unavailable, falling back to local storage:', payloadError)
+      }
+    }
+
+    const deleted = await deleteLocalNote(id)
+    if (!deleted) {
+      return Response.json({ error: 'That note no longer exists.' }, { status: 404 })
+    }
 
     return Response.json({ message: 'Note deleted.' })
   } catch (error) {
